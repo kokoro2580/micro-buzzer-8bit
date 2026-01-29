@@ -1,0 +1,150 @@
+#include <Arduino.h>
+
+/* ---------- PIN ---------- */
+const int buzzerPin = 18;
+const int buttonPin = 19;
+
+/* ---------- NOTE TABLE (Octave 6 from your chart) ---------- */
+#define NOTE_C6   1047
+#define NOTE_D6   1175
+#define NOTE_E6   1319
+#define NOTE_F6   1397
+#define NOTE_G6   1568
+#define NOTE_A6   1760
+#define NOTE_B6   1976
+#define REST      0
+
+/* ---------- MELODY (from your image) ---------- */
+/*
+  Baby Shark notes:
+  C D F F F F F F
+  C D F F F F F F
+  F F E (C D F)
+*/
+
+int melody[] = {
+  // Baby shark (doo doo doo doo doo doo)
+  NOTE_C6, NOTE_D6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6,
+
+  // Baby shark (doo doo doo doo doo doo)
+  NOTE_C6, NOTE_D6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6,
+
+
+  NOTE_C6, NOTE_D6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6, NOTE_F6,
+
+  // Baby shark! (mommy shark...)
+  NOTE_F6, NOTE_F6, NOTE_E6,
+};
+
+int noteDurations[] = {
+  // line 1
+  4,8,10,10,6,10,10,10,
+
+  // line 2
+  4,8,10,10,6,10,10,10,
+
+  4,8,10,10,6,10,10,10,
+
+  // line 3
+  6,8,2
+};
+
+int totalNotes = sizeof(melody) / sizeof(int);
+
+/* ---------- TIMER ---------- */
+hw_timer_t *timer = NULL;
+volatile bool toggle = false;
+
+/* ---------- SPEED SYSTEM ---------- */
+// เริ่มที่ "ปกติ"
+volatile int speedLevel = 2;  
+// 0=ช้ามาก, 1=ช้า, 2=ปกติ, 3=เร็ว, 4=เร็วมาก
+
+const char* speedNames[] = {
+  "Very Slow", "Slow", "Normal", "Fast", "Very Fast"
+};
+
+float speedMultipliers[] = {
+  2.0,   // ช้ามาก
+  1.5,   // ช้า
+  1.0,   // ปกติ
+  0.75,  // เร็ว
+  0.5    // เร็วมาก
+};
+
+/* ---------- BUTTON DEBOUNCE ---------- */
+volatile unsigned long lastButtonTime = 0;
+const unsigned long debounceDelay = 200;
+
+/* ---------- TIMER ISR ---------- */
+void ARDUINO_ISR_ATTR onTimer() {
+  toggle = !toggle;
+  digitalWrite(buzzerPin, toggle);
+}
+
+/* ---------- BUTTON ISR ---------- */
+void ARDUINO_ISR_ATTR onButtonPress() {
+  unsigned long now = millis();
+  if (now - lastButtonTime > debounceDelay) {
+    speedLevel++;
+    if (speedLevel > 4) speedLevel = 0;   // วนค่า
+    lastButtonTime = now;
+  }
+}
+
+/* ---------- SOUND CONTROL ---------- */
+void stopTone() {
+  if (timer) timerStop(timer);
+  digitalWrite(buzzerPin, LOW);
+}
+
+void playTone(int freq) {
+  if (freq == 0) {
+    stopTone();
+    return;
+  }
+  uint64_t alarmVal = 1000000 / (2 * freq); // half period (µs)
+  timerAlarm(timer, alarmVal, true, 0);
+  timerStart(timer);
+}
+
+/* ---------- SETUP ---------- */
+void setup() {
+  Serial.begin(115200);
+
+  pinMode(buzzerPin, OUTPUT);
+  pinMode(buttonPin, INPUT_PULLUP);
+
+  attachInterrupt(digitalPinToInterrupt(buttonPin), onButtonPress, FALLING);
+
+  timer = timerBegin(1000000);        // 1 MHz
+  timerAttachInterrupt(timer, &onTimer);
+
+  Serial.println("🎵 Baby Shark Timer Interrupt System");
+  Serial.println("Start Speed = Normal");
+}
+
+/* ---------- LOOP ---------- */
+void loop() {
+  static int lastSpeed = -1;
+
+  if (lastSpeed != speedLevel) {
+    Serial.print("Speed = ");
+    Serial.println(speedNames[speedLevel]);
+    lastSpeed = speedLevel;
+  }
+
+  for (int i = 0; i < totalNotes; i++) {
+
+    int baseDuration = 1200 / noteDurations[i];
+    int realDuration = baseDuration * speedMultipliers[speedLevel];
+
+    playTone(melody[i]);
+    delay(realDuration);
+
+    stopTone();
+    delay(realDuration * 0.30);   // pause between notes
+  }
+
+  delay(1000);
+}
